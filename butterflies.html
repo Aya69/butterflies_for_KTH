@@ -1,0 +1,1106 @@
+<!-- Flying butterflies by Anna Egorova
+< aegorova@kth.se>  ID 0626 3000 for the course DH2323 course -->
+
+<html>
+<head>
+<title>Butterflies</title>
+<!-- Flying butterflies by Anna Egorova <aegorova@kth.se> ID 0626 3000 DH2323 course  -->
+
+<!-- Here we display number of frames per second. -->
+<div>Click in the scene to create a new flower</div>
+<div>FPS: <span id="fps"></span></div>
+
+<!-- Loading helper WebGL API. -->
+<script type="text/javascript" src="./external-js/webgl-utils.js"></script>
+
+<!-- Fragment shader GLSL code here. -->
+<script id="shader-fs" type="x-shader/x-fragment">
+    precision mediump float;
+
+    /* Image texture uniform. */
+    uniform sampler2D u_image;
+
+    /* Object color, in addition to texture. */
+    uniform vec4 u_color;
+
+    /* Screen resolution. */
+    uniform vec4 u_screen;
+
+    /* Light simulation color (lets say ambient light). */
+    uniform vec4 u_light;
+
+    /* Interpolated coordinates inside texture, from vertex shader. */
+    varying vec2 v_tex_coord;
+
+    void main(void) {
+
+        /* Getting color of the pixel in texture. */
+        vec4 textureColor = texture2D(u_image, v_tex_coord);
+
+        /* Some effect based on position of current fragment/pixel. */
+        vec4 pos_related_color = gl_FragCoord / u_screen;
+
+        /* Dream mode */
+
+        pos_related_color[3] = 0.0;
+        gl_FragColor = (textureColor + u_color + u_light) + pos_related_color;
+
+
+        /* Night mode */
+        /*
+        pos_related_color[3] = 0.0;
+        gl_FragColor = (textureColor + u_color + u_light) - pos_related_color;
+        */
+
+        /* Summer time mode */
+        /*
+        pos_related_color[3] = 1.0;
+        gl_FragColor = (textureColor + u_color + u_light) / pos_related_color;
+        */
+
+        /* Foggy mode */
+        /*
+        pos_related_color[3] = 1.0;
+        gl_FragColor = (textureColor + u_color + u_light) * pos_related_color;
+        */
+
+    }
+</script>
+
+<!-- Vertex shader GLSL code here. -->
+<script id="shader-vs" type="x-shader/x-vertex">
+
+    /* Texture coordinates from JS. */
+    attribute vec2 a_tex_coord;
+
+    /* Vertex position from JS. */
+    attribute vec4 a_position;
+
+    /* Transformation matrix from JS. */
+    uniform mat4 u_matrix;
+
+    /* Coordinates of pixel in texture for fragment shader. */
+    varying vec2 v_tex_coord;
+
+    void main(void) {
+
+        /* Calculating clipspace vertex position using transformation matrix. */
+        gl_Position = u_matrix * a_position;
+
+        /* Calculating interpolated texture coordinates. */
+        v_tex_coord = a_tex_coord;
+    }
+</script>
+
+
+
+<!--Core JS functionality.-->
+<script type="text/javascript">
+
+    // Global WebGL context object.
+    var gl;
+
+    // Obtaining WebGL context here (standard procedure).
+    function InitGL(canvas) {
+        try {
+            gl = canvas.getContext("webgl");
+            gl.viewportWidth = canvas.width;
+            gl.viewportHeight = canvas.height;
+        } catch (e) {
+        }
+        if (!gl) {
+            alert("Could not initialise WebGL, sorry :(");
+        }
+    }
+
+    // Finding and compiling shader by id: shader-fs or shader-vs
+    // (standard procedure)
+    function GetShader(gl, id) {
+
+        var shaderScript = document.getElementById(id);
+        if (!shaderScript) {
+            return null;
+        }
+
+        var str = "";
+        var k = shaderScript.firstChild;
+        while (k) {
+            if (k.nodeType == 3) {
+                str += k.textContent;
+            }
+            k = k.nextSibling;
+        }
+
+        var shader;
+        if (shaderScript.type == "x-shader/x-fragment") {
+            shader = gl.createShader(gl.FRAGMENT_SHADER);
+        } else if (shaderScript.type == "x-shader/x-vertex") {
+            shader = gl.createShader(gl.VERTEX_SHADER);
+        } else {
+            return null;
+        }
+
+        gl.shaderSource(shader, str);
+        gl.compileShader(shader);
+
+        if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+            alert(gl.getShaderInfoLog(shader));
+            return null;
+        }
+
+        return shader;
+    }
+
+    /* BEGIN OF Math functions taken from the net. */
+    function Make2DProjection(width, height, depth) {
+        // Note: This matrix flips the Y axis so 0 is at the top.
+        return [
+            2 / width, 0, 0, 0,
+            0, -2 / height, 0, 0,
+            0, 0, 2 / depth, 0,
+            -1, 1, 0, 1,
+        ];
+    }
+
+    function MakeTranslation(tx, ty, tz) {
+        return [
+            1,  0,  0,  0,
+            0,  1,  0,  0,
+            0,  0,  1,  0,
+            tx, ty, tz,  1
+        ];
+    }
+
+    function MakeXRotation(angleInRadians) {
+        var c = Math.cos(angleInRadians);
+        var s = Math.sin(angleInRadians);
+
+        return [
+            1, 0, 0, 0,
+            0, c, s, 0,
+            0, -s, c, 0,
+            0, 0, 0, 1
+        ];
+    };
+
+    function MakeYRotation(angleInRadians) {
+        var c = Math.cos(angleInRadians);
+        var s = Math.sin(angleInRadians);
+
+        return [
+            c, 0, -s, 0,
+            0, 1, 0, 0,
+            s, 0, c, 0,
+            0, 0, 0, 1
+        ];
+    };
+
+    function MakeZRotation(angleInRadians) {
+        var c = Math.cos(angleInRadians);
+        var s = Math.sin(angleInRadians);
+        return [
+            c, s, 0, 0,
+            -s, c, 0, 0,
+            0, 0, 1, 0,
+            0, 0, 0, 1,
+        ];
+    }
+
+    function MakeScale(sx, sy, sz) {
+        return [
+            sx, 0,  0,  0,
+            0, sy,  0,  0,
+            0,  0, sz,  0,
+            0,  0,  0,  1,
+        ];
+    }
+
+    function MatrixMultiply(a, b) {
+        var a00 = a[0*4+0];
+        var a01 = a[0*4+1];
+        var a02 = a[0*4+2];
+        var a03 = a[0*4+3];
+        var a10 = a[1*4+0];
+        var a11 = a[1*4+1];
+        var a12 = a[1*4+2];
+        var a13 = a[1*4+3];
+        var a20 = a[2*4+0];
+        var a21 = a[2*4+1];
+        var a22 = a[2*4+2];
+        var a23 = a[2*4+3];
+        var a30 = a[3*4+0];
+        var a31 = a[3*4+1];
+        var a32 = a[3*4+2];
+        var a33 = a[3*4+3];
+        var b00 = b[0*4+0];
+        var b01 = b[0*4+1];
+        var b02 = b[0*4+2];
+        var b03 = b[0*4+3];
+        var b10 = b[1*4+0];
+        var b11 = b[1*4+1];
+        var b12 = b[1*4+2];
+        var b13 = b[1*4+3];
+        var b20 = b[2*4+0];
+        var b21 = b[2*4+1];
+        var b22 = b[2*4+2];
+        var b23 = b[2*4+3];
+        var b30 = b[3*4+0];
+        var b31 = b[3*4+1];
+        var b32 = b[3*4+2];
+        var b33 = b[3*4+3];
+        return [a00 * b00 + a01 * b10 + a02 * b20 + a03 * b30,
+            a00 * b01 + a01 * b11 + a02 * b21 + a03 * b31,
+            a00 * b02 + a01 * b12 + a02 * b22 + a03 * b32,
+            a00 * b03 + a01 * b13 + a02 * b23 + a03 * b33,
+            a10 * b00 + a11 * b10 + a12 * b20 + a13 * b30,
+            a10 * b01 + a11 * b11 + a12 * b21 + a13 * b31,
+            a10 * b02 + a11 * b12 + a12 * b22 + a13 * b32,
+            a10 * b03 + a11 * b13 + a12 * b23 + a13 * b33,
+            a20 * b00 + a21 * b10 + a22 * b20 + a23 * b30,
+            a20 * b01 + a21 * b11 + a22 * b21 + a23 * b31,
+            a20 * b02 + a21 * b12 + a22 * b22 + a23 * b32,
+            a20 * b03 + a21 * b13 + a22 * b23 + a23 * b33,
+            a30 * b00 + a31 * b10 + a32 * b20 + a33 * b30,
+            a30 * b01 + a31 * b11 + a32 * b21 + a33 * b31,
+            a30 * b02 + a31 * b12 + a32 * b22 + a33 * b32,
+            a30 * b03 + a31 * b13 + a32 * b23 + a33 * b33];
+    }
+
+    function RandomIntFromInterval(min, max) {
+        return Math.floor(Math.random() * (max - min + 1) + min);
+    }
+
+    /* END OF Math functions taken from the net. */
+
+    var shaderProgram;
+
+    // Initializes rendering: shaders, buffers, etc.
+    function InitRenderer() {
+
+        // Getting and compiling our shaders.
+        var fragmentShader = GetShader(gl, "shader-fs");
+        var vertexShader = GetShader(gl, "shader-vs");
+
+        // Linking all shaders into a program.
+        shaderProgram = gl.createProgram();
+        gl.attachShader(shaderProgram, vertexShader);
+        gl.attachShader(shaderProgram, fragmentShader);
+        gl.linkProgram(shaderProgram);
+
+        if (!gl.getProgramParameter(shaderProgram, gl.LINK_STATUS)) {
+            alert("Could not initialise shaders");
+        }
+
+        // Selecting program as current.
+        gl.useProgram(shaderProgram);
+
+        // Finding all "exposed" shader variables.
+        shaderProgram.vertexPositionAttribute = gl.getAttribLocation(shaderProgram, "a_position");
+        shaderProgram.vertexTexCoordAttribute = gl.getAttribLocation(shaderProgram, "a_tex_coord");
+        shaderProgram.fragmentColorUniform = gl.getUniformLocation(shaderProgram, "u_color");
+        shaderProgram.fragmentLightUniform = gl.getUniformLocation(shaderProgram, "u_light");
+        shaderProgram.vertexMatrixUniform = gl.getUniformLocation(shaderProgram, "u_matrix");
+        shaderProgram.fragmentTextureUniform = gl.getUniformLocation(shaderProgram, "u_image");
+        shaderProgram.screenUniform = gl.getUniformLocation(shaderProgram, "u_screen");
+
+        // Creating global texture buffer.
+        textureBuffer = gl.createBuffer();
+
+        // Creating global vertices buffer.
+        vertexBuffer = gl.createBuffer();
+
+        // WebGL view output rectangle.
+        gl.viewport(0, 0, gl.viewportWidth, gl.viewportHeight);
+
+        // Adding blending so that alpha channel can be used as transparency.
+        gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+        gl.enable(gl.BLEND);
+    }
+
+    // Buffer where we write current texture
+    // (instead of creating a new one on each render).
+    var textureBuffer;
+
+    // Buffer to where we write current vertices.
+    // (instead of creating a new one on each render).
+    var vertexBuffer;
+
+    // Array with all our butterflies.
+    var butterflies = [];
+
+    // Array with all our flowers.
+    var flowers = [];
+
+    // Our scene background (sky, grass, etc).
+    var background;
+
+    // States that each butterfly can be in.
+    var ButterflyStates = {
+        ROTATING: 0, // Rotating to face current destination flower.
+        FLYING: 1, // Accelerating to destination flower.
+        STOPPING: 2 // Stopping to reach destination flower correctly.
+    };
+
+    // Contains all loaded flower images.
+    var flowerImages = [];
+
+    // One rectangle common texture coordinates (flower and background).
+    var CommonTexCoords = new Float32Array([
+        0.0,  0.0,
+        1.0,  0.0,
+        1.0,  1.0,
+        0.0,  0.0,
+        0.0,  1.0]);
+
+    // Two rectangles texture coordinates for butterflies.
+    var ButterflyTexCoords = new Float32Array([
+        0.5,  1.0,
+        0.0,  1.0,
+        0.0,  0.0,
+        0.5,  1.0,
+        0.5,  0.0,
+        1.0,  1.0,
+        1.0,  0.0
+    ]);
+
+    // Creating a new flower.
+    function CreateNewFlower(x, y, color, size, image) {
+
+        var b = this;
+        b.color = color;
+        b.size = size;
+
+        // Flower vertices (can be common but made unique).
+        b.vertices = new Float32Array([
+            0.0, 0.0, 0.0, 1.0,
+            b.size, 0.0, 0.0, 1.0,
+            b.size, b.size, 0.0, 1.0,
+            0.0, 0.0, 0.0, 1.0,
+            0.0, b.size, 0.0, 1.0]);
+
+        b.image = image;
+        b.texture = gl.createTexture();
+
+        // Texture-related parameters.
+        gl.bindTexture(gl.TEXTURE_2D, b.texture);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, b.image);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+        gl.generateMipmap(gl.TEXTURE_2D);
+        gl.bindTexture(gl.TEXTURE_2D, null);
+
+        // Flower coordinates.
+        b.x = x;
+        b.y = y;
+
+        // Random rotation speed for the flower.
+        b.rotationSpeed = (Math.random() - 0.5) / 1000.0;
+
+        // Random initial rotation angle.
+        b.angleZ = Math.random() * Math.PI * 2.0;
+
+        // Common texture coordinates.
+        b.texCoords = CommonTexCoords;
+    }
+
+    // Loading all image resources and creating
+    // simulation objects (flowers, butterflies).
+    function LoadResources() {
+
+        var image = new Image();
+        image.src = "images/bg.png";
+
+        // Image load in JS is asynchronous, so we have to supply a delegate.
+        image.onload = function() {
+
+            var bg = {};
+
+            // Vertices for the background image.
+            bg.vertices = new Float32Array([
+                0.0, 0.0, 0.0, 1.0,
+                image.width, 0.0, 0.0, 1.0,
+                image.width, image.height, 0.0, 1.0,
+                0.0, 0.0, 0.0, 1.0,
+                0.0, image.height, 0.0, 1.0]);
+
+            bg.image = image;
+            bg.texture = gl.createTexture();
+
+            // Texture-related parameters.
+            gl.bindTexture(gl.TEXTURE_2D, bg.texture);
+            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, bg.image);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+            gl.generateMipmap(gl.TEXTURE_2D);
+            gl.bindTexture(gl.TEXTURE_2D, null);
+
+            // Texture coordinates for the background are common.
+            bg.texCoords = CommonTexCoords;
+
+            background = bg;
+
+            // Now generating flowers and butterflies.
+            GenerateFlowers(10);
+        }
+    }
+
+    // Generating flowers (and subsequently butterflies).
+    function GenerateFlowers(howMany) {
+
+
+        var imageNames = ["f1.png", "f2.png", "f3.png", "f4.png"];
+        var numLoaded = 0;
+
+        for (var i = 0; i < imageNames.length; i++) {
+
+            var image = new Image();
+            image.src = "images/" + imageNames[i];
+
+            // Adding images to the list.
+            flowerImages.push(image);
+
+            // Image load in JS is asynchronous, so we have to supply a delegate.
+            image.onload = function() {
+
+                numLoaded++;
+
+                // Checking if we loaded last image.
+                if (numLoaded == imageNames.length) {
+
+                    for (i = 0; i < howMany; i++) {
+
+                        // Getting random flower.
+                        var randFlowerId = RandomIntFromInterval(0, imageNames.length - 1);
+
+                        // Adding to global list of flowers.
+                        flowers.push(
+                            new CreateNewFlower(
+                                Math.random() * gl.viewportWidth,
+                                Math.random() * gl.viewportHeight,
+                                new Float32Array([Math.random() * 0.3, Math.random() * 0.5, Math.random() * 0.3, 0.0]),
+                                60.0 + Math.random() * 70.0,
+                                flowerImages[randFlowerId]));
+                    }
+
+                    GenerateButterflies(50);
+                }
+            };
+        }
+    }
+
+    // Creating one new butterfly.
+    function CreateNewButterfly(size, color, image) {
+
+        var b = this;
+
+        b.angleZ = Math.random() * Math.PI;
+        b.angleX = Math.random() / 3.0;
+        b.angleY = Math.random() / 3.0;
+
+        b.size = size;
+        b.color = color;
+
+        // Vertices for the butterfly (two rectangles).
+        b.vertices = new Float32Array([
+            b.size / 2.0, b.size, 0.0, 1.0,
+            0.0, b.size, 0.0, 1.0,
+            0.0, 0.0, 0.0, 1.0,
+            b.size / 2.0, b.size, 0.0, 1.0,
+            b.size / 2.0, 0.0, 0.0, 1.0,
+            b.size, b.size, 0.0, 1.0,
+            b.size, 0.0, 0.0, 1.0
+        ]);
+
+        b.texCoords = ButterflyTexCoords;
+
+        b.image = image;
+        b.texture = gl.createTexture();
+
+        // Texture-related parameters.
+        gl.bindTexture(gl.TEXTURE_2D, b.texture);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, b.image);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+        gl.generateMipmap(gl.TEXTURE_2D);
+        gl.bindTexture(gl.TEXTURE_2D, null);
+
+        // Mechanics.
+        b.x = Math.random() * gl.viewportWidth;
+        b.y = Math.random() * gl.viewportHeight;
+        b.mass = b.size;
+
+        // Maximum acceleration depends on butterfly size (or mass).
+        b.maxAccel = 1.0 / size;
+
+        // Butterfly initial wings angle.
+        b.wingsAngle = -(Math.PI / 2.0) * 0.75;
+
+        // Initial wings speed is zero.
+        b.wingsSpeed = 0.0;
+
+        // Wings acceleration also depends on butterfly mass.
+        b.wingsAccel = 0.5 / b.mass;
+
+        // Moving towards some random flower.
+        MoveToNewFlower(b);
+    }
+
+    // Generates new butterflies.
+    function GenerateButterflies(howMany) {
+
+        var images = [];
+        var imageNames = ["b1.png", "b2.png", "b3.png", "b4.png"];
+        var numLoaded = 0;
+
+        for (var i = 0; i < imageNames.length; i++) {
+
+            var image = new Image();
+            image.src = "images/" + imageNames[i];
+
+            // Adding images to the list.
+            images.push(image);
+
+            // Image load in JS is asynchronous, so we have to supply a delegate.
+            image.onload = function() {
+
+                numLoaded++;
+
+                // Checking if we loaded last image.
+                if (numLoaded == imageNames.length) {
+
+
+                    for (i = 0; i < howMany; i++) {
+
+                        // Getting random flower.
+                        var randFlowerId = RandomIntFromInterval(0, imageNames.length - 1);
+
+                        butterflies.push(
+                            new CreateNewButterfly(
+                                50.0 + Math.random() * 100.0,
+                                new Float32Array([
+                                    Math.random() * 0.5 - 0.25,
+                                    Math.random() * 0.5 - 0.25,
+                                    Math.random() * 0.5 - 0.25,
+                                    0.0]),
+                                images[randFlowerId]));
+                    }
+
+                    Tick();
+                }
+            };
+        }
+    }
+
+    // Generates a new position for butterfly around current flower.
+    function MoveAroundFlower(b) {
+
+        // Checking if a butterfly already did needed amount of moves
+        // around current flower.
+        if (b.numMovesAroundFlower == 0) {
+            MoveToNewFlower(b);
+            return;
+        }
+
+        var f = flowers[b.curFlowerId];
+
+        // Looping until we find correct distance.
+        var numRetries = 0; // Just checking how many retries we have.
+        while (true) {
+
+            // NOTE: This algorithm with random position is
+            // inefficient because position is likely to
+            // be recalculated.
+
+            // Calculating new random pozition around flower.
+            var dx = RandomIntFromInterval(-b.size, b.size);
+            var dy = RandomIntFromInterval(-b.size, b.size);
+
+            b.destX = f.x + dx;
+            b.destY = f.y + dy;
+
+            // Checking the distance from current position
+            // (should be enough, so that butterfly can rotate).
+            var diffX = (b.destX - b.x);
+            var diffY = (b.destY - b.y);
+
+            // Checking if new position is far enough.
+            if ((Math.abs(diffX) >= (b.size / 4.0)) &&
+                (Math.abs(diffY) >= (b.size / 4.0))) {
+
+                break;
+            }
+
+            // Just checking the number of tries here.
+            numRetries++;
+            if (numRetries > 10) {
+                continue;
+            }
+        }
+
+        // Decreasing number of moves by 1.
+        b.numMovesAroundFlower--;
+
+        // Calculating speed, acceleration, angle, etc. based on new destination.
+        AdoptButterflyToNewPosition(b);
+    }
+
+    // Moving to a new flower.
+    function MoveToNewFlower(b) {
+
+        // Choosing random flower as a destination.
+        var randFlowerId = RandomIntFromInterval(0, flowers.length - 1);
+        b.destX = flowers[randFlowerId].x;
+        b.destY = flowers[randFlowerId].y;
+        b.curFlowerId = randFlowerId;
+        b.numMovesAroundFlower = RandomIntFromInterval(1, 10);
+
+        // New position of the butterfly is calculated,
+        // because we have selected a new destination flower.
+        AdoptButterflyToNewPosition(b);
+    }
+
+    // Calculating butterfly properties based on new destination.
+    function AdoptButterflyToNewPosition(b) {
+
+        // We start with rotating butterfly to destination angle.
+        b.state = ButterflyStates.ROTATING;
+
+        // Calculating speed and acceleration, based on new target (flower).
+        var diffX = (b.destX - b.x);
+        var diffY = (b.destY - b.y);
+        var distance = Math.sqrt(diffX * diffX + diffY * diffY);
+
+        // Calculating acceleration based on mass.
+        b.ax = (diffX / distance) / b.mass;
+        b.ay = (diffY / distance) / b.mass;
+
+        b.origAx = b.ax;
+        b.origAy = b.ay;
+
+        b.vx = b.ax;
+        b.vy = b.ay;
+
+        // Calculating angle (limited by cosinus though).
+        var angle = Math.acos(diffX / distance);
+
+        // Calculating coords when butterfly flies DOWN.
+        b.destAngle = Math.PI / 2.0 - angle;
+
+        // Calculating coords when butterfly flies UP.
+        if (diffY > 0.0) {
+            b.destAngle = Math.PI / 2.0 + angle;
+        }
+
+        // Making sure that angle is always a positive number
+        // which is easier for calculations.
+        if (b.destAngle < 0.0) {
+            b.destAngle = 2 * Math.PI + b.destAngle;
+        } else if (b.destAngle > 2 * Math.PI) {
+            b.destAngle -= 2 * Math.PI;
+        }
+
+        var angleDiff = Math.abs(b.destAngle - b.angleZ);
+        var angle2piDiff = Math.PI * 2.0 - angleDiff;
+
+        // Finding the closest rotation to destination angle.
+        // Speed of rotation depends on mass.
+        if (b.destAngle > b.angleZ) {
+            b.angleV = 5.0 / b.mass;
+        } else {
+            b.angleV = -5.0 / b.mass;
+        }
+
+        // Checking if its faster to go the other direction.
+        if (angle2piDiff < angleDiff) {
+            b.angleV = -b.angleV;
+        }
+
+        // We don't have angle acceleration, just constant speed.
+        b.angleA = 0;
+    }
+
+    // Main procedure to calculate butterfly movements.
+    function MoveButterflies() {
+
+        for (i = 0; i < butterflies.length; i++) {
+
+            var b = butterflies[i];
+
+            switch (b.state) {
+
+                // Butterfly is rotating towards target.
+                case ButterflyStates.ROTATING: {
+
+                    // Checking if angle is close enough to destination.
+                    if (Math.abs(b.angleZ - b.destAngle) < Math.abs(b.angleV)) {
+
+                        b.angleV = 0.0;
+                        b.angleZ = b.destAngle;
+                        b.state = ButterflyStates.FLYING;
+
+                    } else {
+
+                        // Keeping rotation.
+                        b.angleZ += b.angleV;
+                        b.angleV += b.angleA;
+
+                        // Making sure that angle is always a positive number
+                        // which is easier for calculations.
+                        if (b.angleZ < 0.0) {
+                            b.angleZ = 2 * Math.PI + b.angleZ;
+                        } else if (b.angleZ > 2 * Math.PI) {
+                            b.angleZ -= 2 * Math.PI;
+                        }
+                    }
+
+                    // We don't break here, so we move further to flying operations.
+                }
+
+                case ButterflyStates.FLYING: {
+
+                    // Checking if we need to stop.
+                    var diffX = b.destX - b.x;
+                    var diffY = b.destY - b.y;
+
+                    // Calculating the stopping acceleration (by assuming that destination speed is zero).
+                    var breaksAx = -(b.vx * b.vx) / (2.0 * diffX);
+                    var breaksAy = -(b.vy * b.vy) / (2.0 * diffY);
+
+                    // Calculating complete acceleration from X and Y components.
+                    var breaksA = Math.sqrt(breaksAx * breaksAx + breaksAy * breaksAy);
+
+                    // Changing the acceleration to stopping one.
+                    if (breaksA >= b.maxAccel) {
+
+                        b.ax = breaksAx;
+                        b.ay = breaksAy;
+                        b.state = ButterflyStates.STOPPING;
+                    }
+
+                    break;
+                }
+
+                case ButterflyStates.STOPPING: {
+
+                    break;
+                }
+            }
+
+            var prevVx = b.vx;
+            var prevVy = b.vy;
+
+            b.vx += b.ax;
+            b.vy += b.ay;
+
+            // Checking if speed changed the direction
+            // (means that butterfly stopped and reversed the move).
+            if (((prevVx * b.vx) < 0) || ((prevVy * b.vy) < 0)) {
+                MoveAroundFlower(b);
+            }
+
+            b.x += b.vx;
+            b.y += b.vy;
+
+            // Calculating wings angle (up and down).
+            // NOTE: We change the acceleration direction when
+            // wings angle changes the direction.
+            if ((b.wingsAngle * (b.wingsAngle + b.wingsSpeed)) <= 0) {
+
+                // Changing the direction where wings are rotating.
+                b.wingsAccel = -b.wingsAccel;
+            }
+            b.wingsAngle += b.wingsSpeed;
+            b.wingsSpeed += b.wingsAccel;
+
+            var hs = (b.size / 2.0); // Half of the size.
+            var sinA = Math.sin(b.wingsAngle);
+            var cosA = Math.cos(b.wingsAngle);
+
+            // Applying wings angle (only X and Z are changing, Y stays the same).
+            // We need to find correct coordinates, by converting from 2 dimensional
+            // array to 1 dimension array (for that we multiply by 4, number in one row).
+            b.vertices[1 * 4 + 0] = hs - hs * cosA;
+            b.vertices[1 * 4 + 2] = hs * sinA;
+
+            b.vertices[2 * 4 + 0] = hs - hs * cosA;
+            b.vertices[2 * 4 + 2] = hs * sinA;
+
+            b.vertices[5 * 4 + 0] = hs + hs * cosA;
+            b.vertices[5 * 4 + 2] = hs * sinA;
+
+            b.vertices[6 * 4 + 0] = hs + hs * cosA;
+            b.vertices[6 * 4 + 2] = hs * sinA;
+        }
+    }
+
+    // Draws all flowers.
+    function DrawFlowers() {
+
+        for (i = 0; i < flowers.length; i++) {
+            DrawFlower(flowers[i]);
+        }
+    }
+
+    // Draws all butterflies.
+    function DrawButterflies() {
+
+        for (i = 0; i < butterflies.length; i++) {
+            DrawButterfly(butterflies[i]);
+        }
+    }
+
+    // Draws some background on which butterflies and flowers will appear.
+    function DrawBackground() {
+
+        // Setting screen proportions uniform.
+        gl.uniform4fv(shaderProgram.screenUniform, new Float32Array([gl.viewportWidth, gl.viewportHeight, 0.0, 0.0]));
+
+        // Setting color.
+        gl.uniform4fv(shaderProgram.fragmentColorUniform, new Float32Array([0.0, 0.0, 0.0, 0.0]));
+
+        // Setting light.
+        gl.uniform4fv(shaderProgram.fragmentLightUniform, new Float32Array([0.0, 0.0, 0.0, 0.0]));
+
+        // Our view matrix.
+        var projectionMatrix = Make2DProjection(gl.viewportWidth, gl.viewportHeight, 400);
+
+        // Scalling background to fit our viewport.
+        var scaleMatrix = MakeScale(gl.viewportWidth / background.image.width, gl.viewportHeight / background.image.height, 1.0);
+
+        // Computing complete matrix.
+        var matrix = MatrixMultiply(scaleMatrix, projectionMatrix);
+
+        gl.uniformMatrix4fv(shaderProgram.vertexMatrixUniform, false, matrix);
+
+        // Passing the vertices.
+        gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
+        gl.enableVertexAttribArray(shaderProgram.vertexPositionAttribute);
+        gl.vertexAttribPointer(shaderProgram.vertexPositionAttribute, 4, gl.FLOAT, false, 0, 0);
+        gl.bufferData(gl.ARRAY_BUFFER, background.vertices, gl.STATIC_DRAW);
+
+        // Passing the texture information.
+        gl.bindBuffer(gl.ARRAY_BUFFER, textureBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, background.texCoords, gl.STATIC_DRAW);
+        gl.enableVertexAttribArray(shaderProgram.vertexTexCoordAttribute);
+        gl.vertexAttribPointer(shaderProgram.vertexTexCoordAttribute, 2, gl.FLOAT, false, 0, 0);
+
+        // Applying corresponding texture.
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, background.texture);
+
+        // Drawing everything!
+        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 5);
+    }
+
+    // Draws one flower.
+    function DrawFlower(flower) {
+
+        // Setting screen proportions uniform.
+        gl.uniform4fv(shaderProgram.screenUniform, new Float32Array([gl.viewportWidth, gl.viewportHeight, 0.0, 0.0]));
+
+        // Setting extra flower color that combines with texture colors.
+        gl.uniform4fv(shaderProgram.fragmentColorUniform, flower.color);
+
+        // Setting light.
+        gl.uniform4fv(shaderProgram.fragmentLightUniform, new Float32Array([0.0, 0.0, 0.0, 0.0]));
+
+        // Compute the matrices.
+        var projectionMatrix =
+            Make2DProjection(gl.viewportWidth, gl.viewportHeight, 400);
+
+        var translationMatrix = MakeTranslation(flower.x , flower.y, 0.0);
+
+        var rotationXMatrix = MakeXRotation(0.0);
+        var rotationYMatrix = MakeYRotation(0.0);
+        var rotationZMatrix = MakeZRotation(flower.angleZ);
+        flower.angleZ += flower.rotationSpeed;
+
+        // Centering flower around its coordinates.
+        var moveOriginMatrix = MakeTranslation(-flower.size / 2.0, -flower.size / 2.0, 0.0);
+
+        // Multiply the matrices.
+        var matrix = MatrixMultiply(moveOriginMatrix, rotationZMatrix);
+        matrix = MatrixMultiply(matrix, rotationYMatrix);
+        matrix = MatrixMultiply(matrix, rotationXMatrix);
+        matrix = MatrixMultiply(matrix, translationMatrix);
+        matrix = MatrixMultiply(matrix, projectionMatrix);
+
+        gl.uniformMatrix4fv(shaderProgram.vertexMatrixUniform, false, matrix);
+
+        // Passing the vertices.
+        gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
+        gl.enableVertexAttribArray(shaderProgram.vertexPositionAttribute);
+        gl.vertexAttribPointer(shaderProgram.vertexPositionAttribute, 4, gl.FLOAT, false, 0, 0);
+        gl.bufferData(gl.ARRAY_BUFFER, flower.vertices, gl.STATIC_DRAW);
+
+        // Passing the texture information.
+        gl.bindBuffer(gl.ARRAY_BUFFER, textureBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, flower.texCoords, gl.STATIC_DRAW);
+        gl.enableVertexAttribArray(shaderProgram.vertexTexCoordAttribute);
+        gl.vertexAttribPointer(shaderProgram.vertexTexCoordAttribute, 2, gl.FLOAT, false, 0, 0);
+
+        // Applying corresponding texture.
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, flower.texture);
+
+        // Drawing everything!
+        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 5);
+    }
+
+    // Draws one butterfly.
+    function DrawButterfly(b) {
+
+        // Setting screen proportions uniform.
+        gl.uniform4fv(shaderProgram.screenUniform, new Float32Array([gl.viewportWidth, gl.viewportHeight, 0.0, 0.0]));
+
+        // Setting extra butterfly color that combines with texture colors.
+        gl.uniform4fv(shaderProgram.fragmentColorUniform, b.color);
+
+        // Setting light attribute for butterfly wings.
+        var lightSim = -Math.abs(b.wingsAngle / 3.0);
+        gl.uniform4fv(shaderProgram.fragmentLightUniform,
+            new Float32Array([lightSim, lightSim, lightSim, 0.0]));
+
+        // Compute the matrices.
+        var projectionMatrix =
+                Make2DProjection(gl.viewportWidth, gl.viewportHeight, 400);
+
+        // Applying the world coordinates to the butterfly.
+        var translationMatrix =
+                MakeTranslation(b.x, b.y, 0.0);
+
+        // NOTE: By having X and Y angles non-zero we have a better
+        // visual effect on butterflies movement.
+        var rotationXMatrix = MakeXRotation(b.angleX);
+        var rotationYMatrix = MakeYRotation(b.angleY);
+        var rotationZMatrix = MakeZRotation(b.angleZ);
+
+        // Centering butterfly around its coordinates.
+        var moveOriginMatrix = MakeTranslation(-b.size / 2.0, -b.size / 2.0, 0.0);
+
+        // Multiply the matrices.
+        var matrix = MatrixMultiply(moveOriginMatrix, rotationZMatrix);
+        matrix = MatrixMultiply(matrix, rotationYMatrix);
+        matrix = MatrixMultiply(matrix, rotationXMatrix);
+        matrix = MatrixMultiply(matrix, translationMatrix);
+        matrix = MatrixMultiply(matrix, projectionMatrix);
+
+        gl.uniformMatrix4fv(shaderProgram.vertexMatrixUniform, false, matrix);
+
+        // Passing the vertices.
+        gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
+        gl.enableVertexAttribArray(shaderProgram.vertexPositionAttribute);
+        gl.vertexAttribPointer(shaderProgram.vertexPositionAttribute, 4, gl.FLOAT, false, 0, 0);
+        gl.bufferData(gl.ARRAY_BUFFER, b.vertices, gl.STATIC_DRAW);
+
+        // Passing the texture information.
+        gl.bindBuffer(gl.ARRAY_BUFFER, textureBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, b.texCoords, gl.STATIC_DRAW);
+        gl.enableVertexAttribArray(shaderProgram.vertexTexCoordAttribute);
+        gl.vertexAttribPointer(shaderProgram.vertexTexCoordAttribute, 2, gl.FLOAT, false, 0, 0);
+
+        // Applying corresponding texture.
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, b.texture);
+
+        // Drawing everything!
+        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 7);
+    }
+
+    function InitFlowersAndButterflies() {
+
+        LoadResources();
+    }
+
+    function DrawScene() {
+
+        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+        gl.clearColor(0.2, 0.2, 0.2, 1.0);
+
+        // First we draw the background.
+        DrawBackground();
+
+        // Then flowers.
+        DrawFlowers();
+
+        // Then butterflies.
+        DrawButterflies();
+
+        // Calculating the scene mechanics.
+        MoveButterflies();
+    }
+
+    // Calculating FPS.
+    var fpsElement = document.getElementById("fps");
+
+    // Getting time in seconds.
+    var lastTime = Date.now() / 1000;
+
+    // Our main rendering function.
+    function Tick() {
+
+        // Getting current time in seconds.
+        var currentTime = Date.now() / 1000;
+
+        // Computing time since last frame.
+        var elapsedTime = currentTime - lastTime;
+        lastTime = currentTime;
+
+        // Calculating fps.
+        var fps = 1 / elapsedTime;
+        fpsElement.textContent = fps.toFixed(2);
+
+        requestAnimFrame(Tick);
+        DrawScene();
+    }
+
+    // Entry point for the whole program (aka Main).
+    function WebGLStart() {
+        var canvas = document.getElementById("webgl-canvas");
+        InitGL(canvas);
+        InitRenderer();
+        InitFlowersAndButterflies();
+    }
+
+    // Creating new flower when mouse is clicked.
+    function mouseClicked(event) {
+
+        // Getting random flower.
+        var randFlowerId = RandomIntFromInterval(0, flowerImages.length - 1);
+
+        // Adding to global flowers array.
+        flowers.push(
+            new CreateNewFlower(
+                event.clientX,
+                event.clientY,
+                new Float32Array([Math.random() * 0.3, Math.random() * 0.5, Math.random() * 0.3, 0.0]),
+                60.0 + Math.random() * 70.0,
+                flowerImages[randFlowerId]));
+    }
+
+    // Adding listener for mouse clicks.
+    document.addEventListener("click", mouseClicked);
+
+</script>
+
+</head>
+
+<!-- JS calls WebGLStart upon page load. -->
+<body onload="WebGLStart();">
+
+<canvas id="webgl-canvas" />
+
+<script>
+    var canvas = document.getElementById("webgl-canvas");
+    canvas.width = document.body.clientWidth * 0.75;
+    canvas.height = document.body.clientHeight * 0.75;
+</script>
+
+</body>
+</html>
